@@ -1,0 +1,277 @@
+name: Build Fusion Unity Library
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ created ]
+  workflow_dispatch:  # 允许手动触发
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # Windows 平台
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            extension: dll
+            cmake_generator: "Visual Studio 17 2022"
+            cmake_arch: x64
+          - os: windows-latest
+            platform: windows
+            arch: x86
+            extension: dll
+            cmake_generator: "Visual Studio 17 2022"
+            cmake_arch: Win32
+          
+          # macOS 平台
+          - os: macos-latest
+            platform: macos
+            arch: universal
+            extension: bundle
+            cmake_generator: "Xcode"
+            cmake_arch: ""
+          
+          # Linux 平台
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            extension: so
+            cmake_generator: "Unix Makefiles"
+            cmake_arch: ""
+          
+          # Android 平台
+          - os: ubuntu-latest
+            platform: android
+            arch: arm64-v8a
+            extension: so
+            cmake_generator: "Ninja"
+            cmake_arch: ""
+          - os: ubuntu-latest
+            platform: android
+            arch: armeabi-v7a
+            extension: so
+            cmake_generator: "Ninja"
+            cmake_arch: ""
+          - os: ubuntu-latest
+            platform: android
+            arch: x86
+            extension: so
+            cmake_generator: "Ninja"
+            cmake_arch: ""
+          - os: ubuntu-latest
+            platform: android
+            arch: x86_64
+            extension: so
+            cmake_generator: "Ninja"
+            cmake_arch: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download Fusion library
+      run: |
+        git clone https://github.com/xioTechnologies/Fusion.git external/Fusion
+      shell: bash
+
+    - name: Set up CMake
+      uses: jwlawson/actions-setup-cmake@v1.14
+      with:
+        cmake-version: '3.20'
+
+    - name: Set up Visual Studio (Windows only)
+      if: matrix.platform == 'windows'
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Set up Android NDK (Android only)
+      if: matrix.platform == 'android'
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r25c
+        add-to-path: false
+
+    - name: Set up Ninja (Android only)
+      if: matrix.platform == 'android'
+      uses: seanmiddleditch/gha-setup-ninja@master
+
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          cmake .. -G "${{ matrix.cmake_generator }}" -A ${{ matrix.cmake_arch }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        elif [ "${{ matrix.platform }}" = "macos" ]; then
+          cmake .. -G "${{ matrix.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+        elif [ "${{ matrix.platform }}" = "android" ]; then
+          cmake .. -G "${{ matrix.cmake_generator }}" \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.arch }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        else
+          cmake .. -G "${{ matrix.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        fi
+      shell: bash
+      env:
+        ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build . --config ${{ env.BUILD_TYPE }} --parallel
+      shell: bash
+
+    - name: Prepare artifacts
+      run: |
+        mkdir -p artifacts/${{ matrix.platform }}-${{ matrix.arch }}
+        
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          cp build/${{ env.BUILD_TYPE }}/FusionUnity.${{ matrix.extension }} artifacts/${{ matrix.platform }}-${{ matrix.arch }}/
+          # 复制PDB文件用于调试
+          if [ -f "build/${{ env.BUILD_TYPE }}/FusionUnity.pdb" ]; then
+            cp build/${{ env.BUILD_TYPE }}/FusionUnity.pdb artifacts/${{ matrix.platform }}-${{ matrix.arch }}/
+          fi
+        elif [ "${{ matrix.platform }}" = "macos" ]; then
+          cp build/${{ env.BUILD_TYPE }}/FusionUnity.${{ matrix.extension }} artifacts/${{ matrix.platform }}-${{ matrix.arch }}/
+        elif [ "${{ matrix.platform }}" = "android" ]; then
+          cp build/libFusionUnity.${{ matrix.extension }} artifacts/${{ matrix.platform }}-${{ matrix.arch }}/libFusionUnity.${{ matrix.extension }}
+        else
+          cp build/libFusionUnity.${{ matrix.extension }} artifacts/${{ matrix.platform }}-${{ matrix.arch }}/FusionUnity.${{ matrix.extension }}
+        fi
+      shell: bash
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: FusionUnity-${{ matrix.platform }}-${{ matrix.arch }}
+        path: artifacts/${{ matrix.platform }}-${{ matrix.arch }}/
+        retention-days: 30
+
+  package-unity:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: temp-artifacts
+
+    - name: Create Unity package structure
+      run: |
+        mkdir -p unity-package/Assets/Plugins/FusionUnity
+        mkdir -p unity-package/Assets/Scripts/FusionUnity
+        
+        # 创建平台特定目录
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Windows/x86
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Windows/x86_64
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/OSX
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Linux/x86_64
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Android/libs/arm64-v8a
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Android/libs/armeabi-v7a
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Android/libs/x86
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Android/libs/x86_64
+        
+        # 复制文件到对应目录
+        find temp-artifacts -name "FusionUnity.dll" -path "*windows-x86*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Windows/x86/ \;
+        find temp-artifacts -name "FusionUnity.dll" -path "*windows-x64*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Windows/x86_64/ \;
+        find temp-artifacts -name "FusionUnity.bundle" -exec cp {} unity-package/Assets/Plugins/FusionUnity/OSX/ \;
+        find temp-artifacts -name "FusionUnity.so" -path "*linux-x64*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Linux/x86_64/ \;
+        
+        # Android 库文件
+        find temp-artifacts -name "libFusionUnity.so" -path "*android-arm64-v8a*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Android/libs/arm64-v8a/ \;
+        find temp-artifacts -name "libFusionUnity.so" -path "*android-armeabi-v7a*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Android/libs/armeabi-v7a/ \;
+        find temp-artifacts -name "libFusionUnity.so" -path "*android-x86*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Android/libs/x86/ \;
+        find temp-artifacts -name "libFusionUnity.so" -path "*android-x86_64*" -exec cp {} unity-package/Assets/Plugins/FusionUnity/Android/libs/x86_64/ \;
+
+    - name: Create Unity scripts
+      run: |
+        # 复制Unity脚本（稍后创建）
+        if [ -d "unity/Scripts" ]; then
+          cp unity/Scripts/*.cs unity-package/Assets/Scripts/FusionUnity/
+        fi
+
+    - name: Create README for Unity package
+      run: |
+        cat > unity-package/README.md << 'EOF'
+        # Fusion Unity Package
+        
+        这个包包含了编译好的Fusion库，支持Unity和Android部署。
+        
+        ## 安装方法
+        1. 将整个包复制到Unity项目的Assets目录
+        2. 为GameObject添加FusionIMU组件
+        3. 连接您的IMU数据源
+        
+        ## 使用示例
+        ```csharp
+        public class HeadsetController : MonoBehaviour {
+            public FusionIMU fusionIMU;
+            
+            void Update() {
+                Vector3 gyro = GetIMUGyroscope();    // rad/s
+                Vector3 accel = GetIMUAccelerometer(); // m/s²
+                fusionIMU.UpdateIMU(gyro, accel, Time.deltaTime);
+                
+                // 获取去除重力的加速度 - 这是您需要的！
+                Vector3 linearAccel = fusionIMU.linearAcceleration;
+                Vector3 earthAccel = fusionIMU.earthAcceleration;
+            }
+        }
+        ```
+        
+        ## 平台支持
+        - ✅ Windows (x86, x64)
+        - ✅ macOS (Universal Binary)
+        - ✅ Linux (x64)
+        - ✅ Android (ARM64, ARMv7, x86, x86_64)
+        
+        ## 重要说明
+        - linearAcceleration: 传感器坐标系下去除重力的加速度
+        - earthAcceleration: 世界坐标系下去除重力的加速度
+        - 用于头显追踪时，建议使用earthAcceleration进行位置估计
+        EOF
+
+    - name: Package for Unity
+      run: |
+        cd unity-package
+        zip -r ../FusionUnity-Package.zip .
+
+    - name: Upload Unity package
+      uses: actions/upload-artifact@v3
+      with:
+        name: FusionUnity-Package
+        path: FusionUnity-Package.zip
+        retention-days: 90
+
+  release:
+    if: github.event_name == 'release'
+    needs: [build, package-unity]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download Unity package
+      uses: actions/download-artifact@v3
+      with:
+        name: FusionUnity-Package
+
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: FusionUnity-Package.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
