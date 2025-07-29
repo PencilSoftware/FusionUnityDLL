@@ -173,7 +173,7 @@ EXPORT int FusionUnity_IsAccelerationRejected(void* ahrs) {
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     FusionAhrsFlags flags = FusionAhrsGetFlags(&instance->ahrs);
     
-    return flags.accelerationRejection ? 1 : 0;
+    return flags.accelerationRecovery ? 1 : 0;
 }
 
 EXPORT int FusionUnity_IsMagneticRejected(void* ahrs) {
@@ -182,7 +182,7 @@ EXPORT int FusionUnity_IsMagneticRejected(void* ahrs) {
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     FusionAhrsFlags flags = FusionAhrsGetFlags(&instance->ahrs);
     
-    return flags.magneticRejection ? 1 : 0;
+    return flags.magneticRecovery ? 1 : 0;
 }
 
 EXPORT void FusionUnity_Reset(void* ahrs) {
