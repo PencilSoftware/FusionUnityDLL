@@ -33,7 +33,7 @@ EXPORT void FusionUnity_SetSettings(void* ahrs, UnityAhrsSettings settings) {
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     
-    const FusionAhrsSettings fusionSettings = {
+    const FusionAhrsSettings ahrsSettings = {
         .convention = (FusionConvention)settings.convention,
         .gain = settings.gain,
         .gyroscopeRange = settings.gyroscopeRange,
@@ -42,7 +42,7 @@ EXPORT void FusionUnity_SetSettings(void* ahrs, UnityAhrsSettings settings) {
         .recoveryTriggerPeriod = settings.recoveryTriggerPeriod,
     };
     
-    FusionAhrsSetSettings(&instance->ahrs, &fusionSettings);
+    FusionAhrsSetSettings(&instance->ahrs, &ahrsSettings);
 }
 
 EXPORT void FusionUnity_UpdateIMU(void* ahrs, UnityVector3 gyro, UnityVector3 accel, float deltaTime) {
@@ -50,15 +50,21 @@ EXPORT void FusionUnity_UpdateIMU(void* ahrs, UnityVector3 gyro, UnityVector3 ac
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     
-    // 转换为Fusion向量格式
-    FusionVector gyroscope = {gyro.x, gyro.y, gyro.z};
-    FusionVector accelerometer = {accel.x, accel.y, accel.z};
+    // 转换Unity向量到Fusion向量
+    const FusionVector fusionGyro = {
+        .array[0] = gyro.x,
+        .array[1] = gyro.y,
+        .array[2] = gyro.z
+    };
     
-    // 陀螺仪偏移校正
-    gyroscope = FusionOffsetUpdate(&instance->offset, gyroscope);
+    const FusionVector fusionAccel = {
+        .array[0] = accel.x,
+        .array[1] = accel.y,
+        .array[2] = accel.z
+    };
     
-    // 更新AHRS（仅使用陀螺仪和加速度计）
-    FusionAhrsUpdateNoMagnetometer(&instance->ahrs, gyroscope, accelerometer, deltaTime);
+    // 更新AHRS（不使用磁力计）
+    FusionAhrsUpdateNoMagnetometer(&instance->ahrs, fusionGyro, fusionAccel, deltaTime);
 }
 
 EXPORT void FusionUnity_Update9DOF(void* ahrs, UnityVector3 gyro, UnityVector3 accel, UnityVector3 mag, float deltaTime) {
@@ -66,77 +72,94 @@ EXPORT void FusionUnity_Update9DOF(void* ahrs, UnityVector3 gyro, UnityVector3 a
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     
-    // 转换为Fusion向量格式
-    FusionVector gyroscope = {gyro.x, gyro.y, gyro.z};
-    FusionVector accelerometer = {accel.x, accel.y, accel.z};
-    FusionVector magnetometer = {mag.x, mag.y, mag.z};
+    // 转换Unity向量到Fusion向量
+    const FusionVector fusionGyro = {
+        .array[0] = gyro.x,
+        .array[1] = gyro.y,
+        .array[2] = gyro.z
+    };
     
-    // 陀螺仪偏移校正
-    gyroscope = FusionOffsetUpdate(&instance->offset, gyroscope);
+    const FusionVector fusionAccel = {
+        .array[0] = accel.x,
+        .array[1] = accel.y,
+        .array[2] = accel.z
+    };
     
-    // 更新AHRS（使用所有九轴数据）
-    FusionAhrsUpdate(&instance->ahrs, gyroscope, accelerometer, magnetometer, deltaTime);
+    const FusionVector fusionMag = {
+        .array[0] = mag.x,
+        .array[1] = mag.y,
+        .array[2] = mag.z
+    };
+    
+    // 更新AHRS（使用磁力计）
+    FusionAhrsUpdate(&instance->ahrs, fusionGyro, fusionAccel, fusionMag, deltaTime);
 }
 
 EXPORT UnityQuaternion FusionUnity_GetQuaternion(void* ahrs) {
-    UnityQuaternion result = {1, 0, 0, 0};
+    UnityQuaternion result = {1.0f, 0.0f, 0.0f, 0.0f};
     if (!ahrs) return result;
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     FusionQuaternion q = FusionAhrsGetQuaternion(&instance->ahrs);
     
-    result.w = q.element.w;
-    result.x = q.element.x;
-    result.y = q.element.y;
-    result.z = q.element.z;
+    result.w = q.array[0];
+    result.x = q.array[1];
+    result.y = q.array[2];
+    result.z = q.array[3];
     
     return result;
 }
 
 EXPORT UnityVector3 FusionUnity_GetLinearAcceleration(void* ahrs) {
-    UnityVector3 result = {0, 0, 0};
+    UnityVector3 result = {0.0f, 0.0f, 0.0f};
     if (!ahrs) return result;
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     FusionVector accel = FusionAhrsGetLinearAcceleration(&instance->ahrs);
     
-    result.x = accel.element.x;
-    result.y = accel.element.y;
-    result.z = accel.element.z;
+    result.x = accel.axis.x;
+    result.y = accel.axis.y;
+    result.z = accel.axis.z;
     
     return result;
 }
 
 EXPORT UnityVector3 FusionUnity_GetEarthAcceleration(void* ahrs) {
-    UnityVector3 result = {0, 0, 0};
+    UnityVector3 result = {0.0f, 0.0f, 0.0f};
     if (!ahrs) return result;
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     FusionVector accel = FusionAhrsGetEarthAcceleration(&instance->ahrs);
     
-    result.x = accel.element.x;
-    result.y = accel.element.y;
-    result.z = accel.element.z;
+    result.x = accel.axis.x;
+    result.y = accel.axis.y;
+    result.z = accel.axis.z;
     
     return result;
 }
 
 EXPORT UnityVector3 FusionUnity_GetGravity(void* ahrs) {
-    UnityVector3 result = {0, 0, 0};
+    UnityVector3 result = {0.0f, 0.0f, -9.81f};
     if (!ahrs) return result;
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
-    FusionVector gravity = FusionAhrsGetGravity(&instance->ahrs);
     
-    result.x = gravity.element.x;
-    result.y = gravity.element.y;
-    result.z = gravity.element.z;
+    // 获取当前姿态四元数
+    FusionQuaternion q = FusionAhrsGetQuaternion(&instance->ahrs);
+    
+    // 计算重力在body坐标系中的向量
+    // 使用四元数旋转世界坐标系的重力向量[0,0,-9.81]到body坐标系
+    float qw = q.array[0], qx = q.array[1], qy = q.array[2], qz = q.array[3];
+    
+    result.x = 2.0f * (qx * qz - qw * qy) * (-9.81f);
+    result.y = 2.0f * (qy * qz + qw * qx) * (-9.81f);
+    result.z = (qw * qw - qx * qx - qy * qy + qz * qz) * (-9.81f);
     
     return result;
 }
 
 EXPORT int FusionUnity_IsInitialising(void* ahrs) {
-    if (!ahrs) return 0;
+    if (!ahrs) return 1;
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
     FusionAhrsFlags flags = FusionAhrsGetFlags(&instance->ahrs);
@@ -148,7 +171,23 @@ EXPORT int FusionUnity_IsAccelerationRejected(void* ahrs) {
     if (!ahrs) return 0;
     
     FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
-    FusionAhrsInternalStates states = FusionAhrsGetInternalStates(&instance->ahrs);
+    FusionAhrsFlags flags = FusionAhrsGetFlags(&instance->ahrs);
     
-    return states.accelerometerIgnored ? 1 : 0;
+    return flags.accelerationRejection ? 1 : 0;
+}
+
+EXPORT int FusionUnity_IsMagneticRejected(void* ahrs) {
+    if (!ahrs) return 0;
+    
+    FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
+    FusionAhrsFlags flags = FusionAhrsGetFlags(&instance->ahrs);
+    
+    return flags.magneticRejection ? 1 : 0;
+}
+
+EXPORT void FusionUnity_Reset(void* ahrs) {
+    if (!ahrs) return;
+    
+    FusionUnityInstance* instance = (FusionUnityInstance*)ahrs;
+    FusionAhrsReset(&instance->ahrs);
 } 
