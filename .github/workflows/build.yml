@@ -48,8 +48,18 @@ jobs:
         retention-days: 30
 
   build-android:
-    name: Build Android ARM64
+    name: Build Android Libraries
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        android_abi: [armeabi-v7a, arm64-v8a]
+        include:
+          - android_abi: armeabi-v7a
+            arch_name: ARMv7a-32bit
+            android_platform: android-21
+          - android_abi: arm64-v8a
+            arch_name: ARMv8a-64bit
+            android_platform: android-21
 
     steps:
     - name: Checkout repository
@@ -67,32 +77,32 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential cmake ninja-build
 
-    - name: Configure CMake for Android
+    - name: Configure CMake for Android ${{ matrix.android_abi }}
       run: |
-        mkdir build
-        cd build
+        mkdir build-${{ matrix.android_abi }}
+        cd build-${{ matrix.android_abi }}
         cmake .. -G "Ninja" \
           -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-          -DANDROID_ABI=arm64-v8a \
-          -DANDROID_PLATFORM=android-24 \
+          -DANDROID_ABI=${{ matrix.android_abi }} \
+          -DANDROID_PLATFORM=${{ matrix.android_platform }} \
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
           -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=0x4000" \
           -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=0x4000"
 
-    - name: Build
+    - name: Build ${{ matrix.android_abi }}
       run: |
-        cmake --build build --parallel
+        cmake --build build-${{ matrix.android_abi }} --parallel
 
-    - name: Prepare artifacts
+    - name: Prepare artifacts for ${{ matrix.android_abi }}
       run: |
-        mkdir artifacts
-        cp build/libFusionUnity.so artifacts/
+        mkdir artifacts-${{ matrix.android_abi }}
+        cp build-${{ matrix.android_abi }}/libFusionUnity.so artifacts-${{ matrix.android_abi }}/
 
-    - name: Upload Android artifacts
+    - name: Upload Android ${{ matrix.arch_name }} artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: FusionUnity-Android-ARM64
-        path: artifacts/
+        name: FusionUnity-Android-${{ matrix.arch_name }}
+        path: artifacts-${{ matrix.android_abi }}/
         retention-days: 30
 
   package-unity:
@@ -110,23 +120,33 @@ jobs:
         name: FusionUnity-Windows-x64
         path: artifacts/windows/
 
-    - name: Download Android artifacts
+    - name: Download Android ARMv7a artifacts
       uses: actions/download-artifact@v4
       with:
-        name: FusionUnity-Android-ARM64
-        path: artifacts/android/
+        name: FusionUnity-Android-ARMv7a-32bit
+        path: artifacts/android-armv7a/
+
+    - name: Download Android ARMv8a artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: FusionUnity-Android-ARMv8a-64bit
+        path: artifacts/android-arm64/
 
     - name: Create Unity package
       run: |
         mkdir -p unity-package/Assets/Plugins/FusionUnity/Windows/x86_64
+        mkdir -p unity-package/Assets/Plugins/FusionUnity/Android/libs/armeabi-v7a
         mkdir -p unity-package/Assets/Plugins/FusionUnity/Android/libs/arm64-v8a
         mkdir -p unity-package/Assets/Scripts/FusionUnity
         
         # 复制Windows DLL
         cp artifacts/windows/FusionUnity.dll unity-package/Assets/Plugins/FusionUnity/Windows/x86_64/
         
-        # 复制Android库
-        cp artifacts/android/libFusionUnity.so unity-package/Assets/Plugins/FusionUnity/Android/libs/arm64-v8a/
+        # 复制Android库 - 32位ARMv7a (兼容armv8A 32位)
+        cp artifacts/android-armv7a/libFusionUnity.so unity-package/Assets/Plugins/FusionUnity/Android/libs/armeabi-v7a/
+        
+        # 复制Android库 - 64位ARMv8a
+        cp artifacts/android-arm64/libFusionUnity.so unity-package/Assets/Plugins/FusionUnity/Android/libs/arm64-v8a/
         
         # 复制Unity脚本
         if [ -d "unity/Scripts" ]; then
@@ -141,7 +161,8 @@ jobs:
         
         ## 平台支持
         - ✅ Windows x64 (Unity编辑器)
-        - ✅ Android ARM64 (头显设备)
+        - ✅ Android ARMv7a 32位 (armv8A 32位兼容)
+        - ✅ Android ARMv8a 64位 (arm64-v8a)
         
         ## 核心功能
         **去除重力的加速度数据** - 这是您头显位置估计的关键！
@@ -195,7 +216,8 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 包含内容:" >> $GITHUB_STEP_SUMMARY
         echo "- Windows x64 DLL (Unity编辑器)" >> $GITHUB_STEP_SUMMARY
-        echo "- Android ARM64 库 (头显设备)" >> $GITHUB_STEP_SUMMARY
+        echo "- Android ARMv7a 32位库 (armv8A 32位兼容)" >> $GITHUB_STEP_SUMMARY
+        echo "- Android ARMv8a 64位库 (arm64-v8a)" >> $GITHUB_STEP_SUMMARY
         echo "- Unity C# 脚本和示例" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🚀 核心功能:" >> $GITHUB_STEP_SUMMARY
